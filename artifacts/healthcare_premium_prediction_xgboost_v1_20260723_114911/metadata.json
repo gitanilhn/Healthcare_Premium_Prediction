@@ -1,0 +1,58 @@
+{
+    "project_name": "healthcare_premium_prediction",
+    "model_name": "Healthcare Premium Prediction",
+    "model_version": "healthcare_premium_prediction_xgboost_v1_20260723_114911",
+    "algorithm": "XGBoost",
+    "training_date": "2026-07-23 11:49:11",
+    "dataset": "premiums_with_life_style.xlsx",
+    "training_samples": 6940,
+    "testing_samples": 2975,
+    "total_features": 19,
+    "feature_columns": [
+        "age",
+        "number_of_dependants",
+        "income_level",
+        "income_lakhs",
+        "insurance_plan",
+        "normalized_risk_score",
+        "lifestyle_risk_score",
+        "gender_Male",
+        "region_Northwest",
+        "region_Southeast",
+        "region_Southwest",
+        "marital_status_Unmarried",
+        "bmi_category_Obesity",
+        "bmi_category_Overweight",
+        "bmi_category_Underweight",
+        "smoking_status_Occasional",
+        "smoking_status_Regular",
+        "employment_status_Salaried",
+        "employment_status_Self-Employed"
+    ],
+    "scaling_columns": [
+        "age",
+        "number_of_dependants",
+        "income_level",
+        "income_lakhs",
+        "insurance_plan",
+        "lifestyle_risk_score",
+        "normalized_risk_score"
+    ],
+    "metrics": {
+        "R2": 0.9929,
+        "MAE": 607.9485,
+        "RMSE": 751.5876
+    },
+    "model_comparison": {
+        "Linear Regression": {
+            "R2": 0.9594,
+            "MAE": 1387.937,
+            "RMSE": 1794.9121
+        },
+        "XGBoost": {
+            "R2": 0.9929,
+            "MAE": 607.9485,
+            "RMSE": 751.5876
+        }
+    }
+}

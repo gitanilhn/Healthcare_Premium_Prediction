@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "healthcare-premium-prediction"
+version = "1.0.0"
+description = "Healthcare Premium Prediction MLOps Project"
+requires-python = ">=3.10,<3.11"
+
+dependencies = [
+    "fastapi==0.139.2",
+    "uvicorn==0.51.0",
+    "pandas==2.3.3",
+    "numpy==2.2.6",
+    "scikit-learn==1.7.2",
+    "scipy==1.15.3",
+    "xgboost==3.2.0",
+    "joblib==1.5.3",
+    "openpyxl==3.1.5",
+    "matplotlib==3.10.9",
+    "mlflow==3.14.0",
+    "boto3",
+    "python-dotenv==1.2.2",
+    "pydantic==2.13.4",
+    "requests==2.34.2",
+    "botocore[crt]>=1.43.54",
+]
+
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "httpx==0.28.1",
+    "black==25.1.0",
+    "flake8==7.3.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]

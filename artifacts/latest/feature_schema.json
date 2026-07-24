@@ -1,0 +1,41 @@
+{
+    "feature_count": 19,
+    "feature_columns": [
+        "age",
+        "number_of_dependants",
+        "income_level",
+        "income_lakhs",
+        "insurance_plan",
+        "normalized_risk_score",
+        "lifestyle_risk_score",
+        "gender_Male",
+        "region_Northwest",
+        "region_Southeast",
+        "region_Southwest",
+        "marital_status_Unmarried",
+        "bmi_category_Obesity",
+        "bmi_category_Overweight",
+        "bmi_category_Underweight",
+        "smoking_status_Occasional",
+        "smoking_status_Regular",
+        "employment_status_Salaried",
+        "employment_status_Self-Employed"
+    ],
+    "scaling_columns": [
+        "age",
+        "number_of_dependants",
+        "income_level",
+        "income_lakhs",
+        "insurance_plan",
+        "lifestyle_risk_score",
+        "normalized_risk_score"
+    ],
+    "categorical_columns": [
+        "gender",
+        "region",
+        "marital_status",
+        "bmi_category",
+        "smoking_status",
+        "employment_status"
+    ]
+}
