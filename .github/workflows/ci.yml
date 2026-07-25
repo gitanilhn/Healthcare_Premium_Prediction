@@ -31,7 +31,8 @@ jobs:
 
       - name: Run tests
         env:
-          ENVIRONMENT: test
+          MODEL_LOAD_MODE: local
+          MODEL_LOCAL_DIR: artifacts/latest
         run: uv run pytest -v
 
       - name: Check code formatting
