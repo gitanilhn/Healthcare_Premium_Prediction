@@ -31,8 +31,7 @@ jobs:
 
       - name: Run tests
         env:
-          MODEL_BUCKET: test-bucket
-          MODEL_PATH: test-model
+          ENVIRONMENT: test
         run: uv run pytest -v
 
       - name: Check code formatting

@@ -10,6 +10,8 @@ app = FastAPI(
     version="1.0.0",
 )
 
+predictor.load_model()
+
 
 @app.get("/")
 def root():
