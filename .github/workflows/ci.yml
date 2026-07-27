@@ -28,15 +28,17 @@ jobs:
           version: latest
 
       - name: Install Dependencies
-        run: uv sync --frozen
+        run: uv sync --locked
 
       - name: Verify Python environment
         run: |
-        uv run python --version
-        uv run python -c "import boto3; print('✓ boto3 imported successfully')"
-        uv run python -c "import sklearn; print('✓ scikit-learn imported successfully')"
-        uv run python -c "import xgboost; print('✓ xgboost imported successfully')"
-        uv run python -c "import fastapi; print('✓ fastapi imported successfully')"
+          uv run python --version
+          uv run python -c "import boto3; print('✓ boto3 imported successfully')"
+          uv run python -c "import sklearn; print('✓ scikit-learn imported successfully')"
+          uv run python -c "import xgboost; print('✓ xgboost imported successfully')"
+          uv run python -c "import fastapi; print('✓ fastapi imported successfully')"
+          uv run python -c "import boto3; print(boto3.__version__)"
+          uv run python -c "from config.settings import APP_ENV; print(APP_ENV)"
 
       - name: Run Unit Tests
         env:
