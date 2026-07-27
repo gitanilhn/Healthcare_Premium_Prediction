@@ -1,28 +1,29 @@
-artifacts/
+# Git
+.git
+.github/
 
-data/
-
-venv/
-venv_repro/
+# Python
 .venv/
-
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-
-.git/
-.gitignore
-
-mlruns/
-.mlflow/
-
 .pytest_cache/
-.mypy_cache/
 
-.env
-.env.*
+# Tests
+tests/
 
+# Training data
+data/
+
+# MLflow
+mlruns/
+mlflow.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
 *.log
 
+# Documentation
 README.md

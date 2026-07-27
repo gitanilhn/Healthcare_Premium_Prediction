@@ -4,6 +4,9 @@ from schemas import PredictionRequest
 
 from src.prediction import predictor
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(
     title="Healthcare Premium Prediction API",

@@ -1,178 +1,130 @@
-import json
-import joblib
-import numpy as np
-import pandas as pd
+"""
+Healthcare Premium Prediction Service
 
+Production Architecture
+
+Supports
+
+- Local Development
+- Docker
+- Kubernetes
+- AWS S3
+- GitHub Actions
+- ArgoCD
+- Amazon EKS
+
+Author:
+Anil MLOps Project
+"""
+
+from __future__ import annotations
+
+import json
+import logging
 import os
 import shutil
 import tempfile
 
 from pathlib import Path
+from typing import Dict
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+import joblib
 
-
-# ============================================================
-# Configuration
-# ============================================================
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-# ------------------------------------------------------------
-# Model loading mode
-#
-# Supported values:
-#
-#   s3       -> Download artifacts from S3
-#   local    -> Load artifacts from local MODEL_LOCAL_DIR
-#   disabled -> Do not load model
-#
-# Default:
-#   s3 when MODEL_BUCKET and MODEL_PATH are configured
-#   disabled otherwise
-#
-# This prevents pytest/CI from trying to access S3 during
-# module import.
-# ------------------------------------------------------------
-
-MODEL_LOAD_MODE = os.getenv("MODEL_LOAD_MODE")
-
-MODEL_BUCKET = os.getenv("MODEL_BUCKET")
-MODEL_PATH = os.getenv("MODEL_PATH")
-
-AWS_DEFAULT_REGION = os.getenv(
-    "AWS_DEFAULT_REGION",
-    "ap-south-1",
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
 )
 
-# ------------------------------------------------------------
-# Local runtime cache
+import numpy as np
+import pandas as pd
+
+from config.settings import (
+    MODEL_SOURCE,
+    MODEL_BUCKET,
+    MODEL_VERSION,
+    AWS_REGION,
+    LATEST_ARTIFACT_DIR,
+    MODEL_FILE,
+    PREPROCESSOR_FILE,
+    METADATA_FILE,
+    FEATURE_SCHEMA_FILE,
+)
+
+# ==========================================================
+# Logger
+# ==========================================================
+
+logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+# ==========================================================
+# Local Artifact Paths
+# ==========================================================
+
+ARTIFACT_DIR = LATEST_ARTIFACT_DIR
+
+LOCAL_MODEL_PATH = MODEL_FILE
+
+LOCAL_PREPROCESSOR_PATH = PREPROCESSOR_FILE
+
+LOCAL_METADATA_PATH = METADATA_FILE
+
+LOCAL_FEATURE_SCHEMA_PATH = FEATURE_SCHEMA_FILE
+
+# ==========================================================
+# S3 Folder Structure
 #
-# Production:
-#   /tmp/model
+# Example
 #
-# Local development:
-#   Can be overridden with MODEL_LOCAL_DIR
+# healthcare-models/
 #
-# CI:
-#   Can use MODEL_LOAD_MODE=disabled
-# ------------------------------------------------------------
+#     healthcare_premium_prediction/
+#
+#         v1/
+#             model.pkl
+#             preprocessor.pkl
+#             metadata.json
+#             feature_schema.json
+#
+# ==========================================================
 
-ARTIFACT_DIR = Path(
-    os.getenv(
-        "MODEL_LOCAL_DIR",
-        "/tmp/model",
-    )
-).resolve()
+S3_MODEL_PREFIX = (
+    f"healthcare_premium_prediction/{MODEL_VERSION}"
+)
 
-LOCAL_MODEL_PATH = ARTIFACT_DIR / "model.pkl"
-
-LOCAL_PREPROCESSOR_PATH = ARTIFACT_DIR / "preprocessor.pkl"
-
-LOCAL_METADATA_PATH = ARTIFACT_DIR / "metadata.json"
-
-LOCAL_FEATURE_SCHEMA_PATH = ARTIFACT_DIR / "feature_schema.json"
-
+# ==========================================================
+# Required Artifact Files
+# ==========================================================
 
 S3_ARTIFACT_FILES = {
+
     "model.pkl": LOCAL_MODEL_PATH,
+
     "preprocessor.pkl": LOCAL_PREPROCESSOR_PATH,
+
     "metadata.json": LOCAL_METADATA_PATH,
+
     "feature_schema.json": LOCAL_FEATURE_SCHEMA_PATH,
+
 }
 
+# ==========================================================
+# Utility Functions
+# ==========================================================
 
-# ============================================================
-# Determine Model Loading Mode
-# ============================================================
 
-
-def get_model_load_mode():
+def _clean_artifact_directory() -> None:
     """
-    Determine how model artifacts should be loaded.
+    Remove local artifacts.
 
-    Priority:
-
-    1. Explicit MODEL_LOAD_MODE environment variable
-    2. S3 if MODEL_BUCKET and MODEL_PATH are configured
-    3. Disabled otherwise
-
-    Examples:
-
-    Production:
-        MODEL_LOAD_MODE=s3
-
-    Local:
-        MODEL_LOAD_MODE=local
-
-    CI:
-        MODEL_LOAD_MODE=disabled
+    Used before downloading
+    a new model from S3.
     """
-
-    if MODEL_LOAD_MODE:
-        return MODEL_LOAD_MODE.lower().strip()
-
-    if MODEL_BUCKET and MODEL_PATH:
-        return "s3"
-
-    return "disabled"
-
-
-# ============================================================
-# S3 Utilities
-# ============================================================
-
-
-def _normalise_s3_prefix(prefix):
-    """
-    Return an S3 prefix without leading/trailing slashes.
-    """
-
-    if prefix is None:
-        return ""
-
-    return prefix.strip("/")
-
-
-def download_model_artifacts():
-    """
-    Download the selected model artifacts from S3
-    into the local runtime artifact directory.
-
-    This function is explicitly called only when
-    S3 model loading is required.
-
-    It is NOT called automatically when this module
-    is imported.
-    """
-
-    if not MODEL_BUCKET:
-        raise RuntimeError(
-            "MODEL_BUCKET environment variable is not configured. "
-            "Set MODEL_BUCKET to the S3 bucket containing "
-            "the model artifacts."
-        )
-
-    if not MODEL_PATH:
-        raise RuntimeError(
-            "MODEL_PATH environment variable is not configured. "
-            "Set MODEL_PATH to the S3 model/version prefix."
-        )
-
-    s3_prefix = _normalise_s3_prefix(MODEL_PATH)
-
-    print("Model artifact source:")
-    print(f"  S3 Bucket : {MODEL_BUCKET}")
-    print(f"  S3 Path   : " f"s3://{MODEL_BUCKET}/{s3_prefix}/")
-    print(f"  Local Dir : {ARTIFACT_DIR}")
-
-    # --------------------------------------------------------
-    # Start from a clean runtime directory.
-    #
-    # This prevents the application from accidentally
-    # loading artifacts belonging to an older model version.
-    # --------------------------------------------------------
 
     if ARTIFACT_DIR.exists():
 
@@ -186,55 +138,123 @@ def download_model_artifacts():
         exist_ok=True,
     )
 
-    # --------------------------------------------------------
-    # Create S3 client
-    #
-    # boto3 will automatically use:
-    #
-    # - IAM Role
-    # - Environment credentials
-    # - AWS CLI credentials
-    # - EKS IRSA / Pod Identity
-    #
-    # depending on the runtime environment.
-    # --------------------------------------------------------
+
+# ==========================================================
+# Validate Local Artifacts
+# ==========================================================
+
+
+def validate_local_artifacts() -> None:
+    """
+    Ensure all required
+    artifact files exist.
+    """
+
+    required_files = [
+
+        LOCAL_MODEL_PATH,
+
+        LOCAL_PREPROCESSOR_PATH,
+
+        LOCAL_METADATA_PATH,
+
+        LOCAL_FEATURE_SCHEMA_PATH,
+
+    ]
+
+    missing_files = [
+
+        str(file)
+
+        for file in required_files
+
+        if not file.exists()
+
+    ]
+
+    if missing_files:
+
+        raise FileNotFoundError(
+
+            "Missing model artifacts:\n"
+
+            + "\n".join(missing_files)
+
+        )
+
+    logger.info("Local artifacts validated successfully.")
+
+
+# ==========================================================
+# Download Model From S3
+# ==========================================================
+
+
+def download_model_artifacts() -> None:
+    """
+    Download model artifacts
+    from S3.
+
+    The destination is
+
+    artifacts/latest/
+
+    Existing artifacts
+    are removed first.
+    """
+
+    if not MODEL_BUCKET:
+
+        raise RuntimeError(
+
+            "MODEL_BUCKET is not configured."
+
+        )
+
+    logger.info("=" * 70)
+
+    logger.info("Downloading model artifacts from S3")
+
+    logger.info("=" * 70)
+
+    logger.info(f"Bucket  : {MODEL_BUCKET}")
+
+    logger.info(f"Version : {MODEL_VERSION}")
+
+    logger.info(f"Prefix  : {S3_MODEL_PREFIX}")
+
+    _clean_artifact_directory()
 
     s3_client = boto3.client(
+
         "s3",
-        region_name=AWS_DEFAULT_REGION,
+
+        region_name=AWS_REGION,
+
     )
 
     downloaded_files = []
 
     try:
 
-        for (
-            filename,
-            local_path,
-        ) in S3_ARTIFACT_FILES.items():
+        for filename, local_path in S3_ARTIFACT_FILES.items():
 
-            if s3_prefix:
+            s3_key = f"{S3_MODEL_PREFIX}/{filename}"
 
-                s3_key = f"{s3_prefix}/{filename}"
+            logger.info(
 
-            else:
+                f"Downloading {s3_key}"
 
-                s3_key = filename
-
-            print(f"Downloading: " f"s3://{MODEL_BUCKET}/{s3_key}")
-
-            # ------------------------------------------------
-            # Download to temporary file first.
-            #
-            # This prevents partially downloaded artifacts
-            # from being treated as valid model files.
-            # ------------------------------------------------
+            )
 
             temp_file = tempfile.NamedTemporaryFile(
-                dir=ARTIFACT_DIR,
-                prefix=f".{filename}.",
-                suffix=".tmp",
+
                 delete=False,
+
+                dir=ARTIFACT_DIR,
+
+                suffix=".tmp",
+
             )
 
             temp_file.close()
@@ -242,14 +262,21 @@ def download_model_artifacts():
             try:
 
                 s3_client.download_file(
+
                     MODEL_BUCKET,
+
                     s3_key,
+
                     temp_file.name,
+
                 )
 
                 os.replace(
+
                     temp_file.name,
+
                     local_path,
+
                 )
 
             finally:
@@ -261,261 +288,236 @@ def download_model_artifacts():
             downloaded_files.append(filename)
 
     except (
+
         ClientError,
+
         BotoCoreError,
+
     ) as exc:
 
         shutil.rmtree(
+
             ARTIFACT_DIR,
+
             ignore_errors=True,
+
         )
 
         raise RuntimeError(
-            "Failed to download model artifacts "
-            "from S3. "
-            f"Bucket='{MODEL_BUCKET}', "
-            f"Path='{MODEL_PATH}'. "
-            f"AWS error: {exc}"
+
+            "Unable to download model "
+
+            f"version {MODEL_VERSION}"
+
         ) from exc
 
-    except Exception:
+    validate_local_artifacts()
 
-        shutil.rmtree(
-            ARTIFACT_DIR,
-            ignore_errors=True,
-        )
+    logger.info("Downloaded Files")
 
-        raise
+    for file in downloaded_files:
 
-    # --------------------------------------------------------
-    # Validate downloaded artifacts
-    # --------------------------------------------------------
+        logger.info(f"   {file}")
 
-    missing_files = [
-        filename
-        for (
-            filename,
-            local_path,
-        ) in S3_ARTIFACT_FILES.items()
-        if not local_path.is_file()
-    ]
+    logger.info("=" * 70)
 
-    if missing_files:
+    logger.info("Model download completed.")
 
-        shutil.rmtree(
-            ARTIFACT_DIR,
-            ignore_errors=True,
-        )
+    logger.info("=" * 70)
 
-        raise FileNotFoundError(
-            "Model download completed but "
-            "required artifacts are missing: "
-            f"{missing_files}"
-        )
-
-    print(f"Downloaded artifacts: " f"{downloaded_files}")
-
-    print("S3 model artifacts downloaded successfully")
-
-
-# ============================================================
-# Local Artifact Validation
-# ============================================================
-
-
-def validate_local_artifacts():
-    """
-    Validate that all required local model artifacts exist.
-    """
-
-    required_files = [
-        LOCAL_MODEL_PATH,
-        LOCAL_PREPROCESSOR_PATH,
-        LOCAL_METADATA_PATH,
-        LOCAL_FEATURE_SCHEMA_PATH,
-    ]
-
-    missing_files = [
-        str(file_path) for file_path in required_files if not file_path.is_file()
-    ]
-
-    if missing_files:
-
-        raise FileNotFoundError(
-            "Required model artifacts are missing: " f"{missing_files}"
-        )
-
-
-# ============================================================
+# ==========================================================
 # Prediction Service
-# ============================================================
+# ==========================================================
 
 
 class PredictionService:
+    """
+    Production Prediction Service
 
-    def __init__(self):
+    Responsible for
 
-        print("=" * 70)
-        print("Initializing Healthcare Premium Prediction Service")
-        print("=" * 70)
+    - Downloading model (if required)
+    - Loading artifacts
+    - Validating artifacts
+    - Loading metadata
+    - Loading preprocessor
+    - Loading trained model
+    """
+
+    def __init__(self) -> None:
 
         self.model = None
+
         self.preprocessor = None
-        self.metadata = None
-        self.feature_schema = None
+
+        self.metadata: Dict = {}
+
+        self.feature_schema: Dict = {}
 
         self.scaler = None
-        self.feature_columns = None
-        self.scaling_columns = None
+
+        self.feature_columns = []
+
+        self.scaling_columns = []
 
         self.is_loaded = False
 
+        logger.info("=" * 70)
+        logger.info("Healthcare Premium Prediction Service")
+        logger.info("=" * 70)
+
         self.load_model()
 
-    # ========================================================
-    # Model Loading
-    # ========================================================
+    # ======================================================
+    # Load Model
+    # ======================================================
 
     def load_model(
         self,
-        mode=None,
-    ):
+        mode: str | None = None,
+    ) -> None:
         """
         Load model artifacts.
 
-        mode options:
+        Supported modes
 
-            s3
-            local
-            disabled
-
-        If mode is not supplied, it is automatically
-        determined from environment variables.
+        local
+        s3
         """
 
         if self.is_loaded:
 
-            print("Model is already loaded. " "Skipping reload.")
+            logger.info("Model already loaded.")
 
             return
 
-        selected_mode = mode if mode else get_model_load_mode()
+        selected_mode = (mode or MODEL_SOURCE).lower().strip()
 
-        selected_mode = selected_mode.lower().strip()
+        logger.info(f"Model Source : {selected_mode}")
 
-        print(f"Model loading mode: " f"{selected_mode}")
-
-        # ----------------------------------------------------
-        # Disabled mode
-        #
-        # Used by CI during import/test collection.
-        # ----------------------------------------------------
-
-        if selected_mode == "disabled":
-
-            print("Model loading is disabled.")
-
-            print("PredictionService initialized " "without loading model artifacts.")
-
-            return
-
-        # ----------------------------------------------------
-        # S3 mode
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Download From S3
+        # ---------------------------------------------
 
         if selected_mode == "s3":
 
             download_model_artifacts()
 
-        # ----------------------------------------------------
-        # Local mode
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Local Artifacts
+        # ---------------------------------------------
 
         elif selected_mode == "local":
-
-            print("Loading model artifacts " "from local directory:")
-
-            print(f"  {ARTIFACT_DIR}")
 
             validate_local_artifacts()
 
         else:
 
             raise ValueError(
-                "Invalid MODEL_LOAD_MODE. "
-                f"Received: '{selected_mode}'. "
-                "Supported values are: "
-                "'s3', 'local', 'disabled'."
+
+                f"Unsupported MODEL_SOURCE : {selected_mode}"
+
             )
 
-        # ----------------------------------------------------
-        # Validate artifacts
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Final Validation
+        # ---------------------------------------------
 
         validate_local_artifacts()
 
-        # ----------------------------------------------------
-        # Load metadata
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Load Metadata
+        # ---------------------------------------------
 
         with open(
+
             LOCAL_METADATA_PATH,
+
             "r",
+
             encoding="utf-8",
+
         ) as f:
 
             self.metadata = json.load(f)
 
-        # ----------------------------------------------------
-        # Load feature schema
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Load Feature Schema
+        # ---------------------------------------------
 
         with open(
+
             LOCAL_FEATURE_SCHEMA_PATH,
+
             "r",
+
             encoding="utf-8",
+
         ) as f:
 
             self.feature_schema = json.load(f)
 
-        # ----------------------------------------------------
-        # Load model
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Load Model
+        # ---------------------------------------------
 
-        self.model = joblib.load(LOCAL_MODEL_PATH)
+        self.model = joblib.load(
 
-        # ----------------------------------------------------
-        # Load preprocessor
-        # ----------------------------------------------------
+            LOCAL_MODEL_PATH
 
-        self.preprocessor = joblib.load(LOCAL_PREPROCESSOR_PATH)
+        )
 
-        # ----------------------------------------------------
-        # Validate preprocessor
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Load Preprocessor
+        # ---------------------------------------------
+
+        self.preprocessor = joblib.load(
+
+            LOCAL_PREPROCESSOR_PATH
+
+        )
+
+        # ---------------------------------------------
+        # Validate Preprocessor
+        # ---------------------------------------------
 
         if not isinstance(
+
             self.preprocessor,
+
             dict,
+
         ):
 
-            raise TypeError("preprocessor.pkl must contain " "a dictionary")
+            raise TypeError(
 
-        required_preprocessor_keys = [
+                "preprocessor.pkl must contain a dictionary."
+
+            )
+
+        required_keys = [
+
             "scaler",
+
             "feature_columns",
+
             "scaling_columns",
+
         ]
 
-        for key in required_preprocessor_keys:
+        for key in required_keys:
 
             if key not in self.preprocessor:
 
-                raise ValueError(f"Missing preprocessor key: " f"{key}")
+                raise ValueError(
 
-        # ----------------------------------------------------
-        # Extract preprocessing information
-        # ----------------------------------------------------
+                    f"Missing preprocessor key : {key}"
+
+                )
+
+        # ---------------------------------------------
+        # Extract Objects
+        # ---------------------------------------------
 
         self.scaler = self.preprocessor["scaler"]
 
@@ -523,13 +525,16 @@ class PredictionService:
 
         self.scaling_columns = self.preprocessor["scaling_columns"]
 
-        # ----------------------------------------------------
-        # Validate metadata feature schema
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Metadata Validation
+        # ---------------------------------------------
 
         metadata_features = self.metadata.get(
+
             "feature_columns",
+
             [],
+
         )
 
         if metadata_features:
@@ -537,71 +542,127 @@ class PredictionService:
             if metadata_features != self.feature_columns:
 
                 raise ValueError(
-                    "Feature mismatch detected "
-                    "between metadata.json and "
-                    "preprocessor.pkl"
+
+                    "Feature mismatch between "
+
+                    "metadata.json and preprocessor.pkl"
+
                 )
 
-        # ----------------------------------------------------
-        # Validate scaler
-        # ----------------------------------------------------
+        # ---------------------------------------------
+        # Validate Scaler
+        # ---------------------------------------------
 
-        scaler_feature_count = getattr(
+        scaler_features = getattr(
+
             self.scaler,
+
             "n_features_in_",
+
             None,
+
         )
 
-        if scaler_feature_count is not None and scaler_feature_count != len(
-            self.scaling_columns
-        ):
+        if scaler_features is not None:
 
-            raise ValueError(
-                "Scaler feature count does not "
-                "match preprocessor scaling "
-                "columns. "
-                f"Scaler expects "
-                f"{scaler_feature_count}, "
-                f"but scaling_columns contains "
-                f"{len(self.scaling_columns)}."
-            )
+            if scaler_features != len(
 
-        # ----------------------------------------------------
-        # Print model information
-        # ----------------------------------------------------
+                self.scaling_columns
 
-        print(f"Model Version      : " f"{self.metadata.get('model_version')}")
+            ):
 
-        print(f"Algorithm          : " f"{self.metadata.get('algorithm')}")
+                raise ValueError(
 
-        print(f"Expected Features  : " f"{len(self.feature_columns)}")
+                    "Scaler feature mismatch."
 
-        print(f"Scaling Features   : " f"{len(self.scaling_columns)}")
-
-        metrics = self.metadata.get(
-            "metrics",
-            {},
-        )
-
-        print(f"R2 Score           : " f"{metrics.get('R2', 'N/A')}")
-
-        print(f"MAE                : " f"{metrics.get('MAE', 'N/A')}")
-
-        print(f"RMSE               : " f"{metrics.get('RMSE', 'N/A')}")
-
-        preprocessor_version = self.preprocessor.get(
-            "preprocessor_version",
-            "N/A",
-        )
-        print(f"Preprocessor Version : " f"{preprocessor_version}")
-
-        print("=" * 70)
-
-        print("Model loaded successfully")
-
-        print("=" * 70)
+                )
 
         self.is_loaded = True
+
+        self._print_model_summary()
+
+    # ======================================================
+    # Print Model Summary
+    # ======================================================
+
+    def _print_model_summary(self) -> None:
+
+        metrics = self.metadata.get(
+
+            "metrics",
+
+            {},
+
+        )
+
+        logger.info("")
+
+        logger.info("=" * 70)
+
+        logger.info("Current Loaded Model")
+
+        logger.info("=" * 70)
+
+        logger.info(
+
+            f"Source               : {MODEL_SOURCE}"
+
+        )
+
+        logger.info(
+
+            f"Version              : {MODEL_VERSION}"
+
+        )
+
+        logger.info(
+
+            f"Algorithm            : {self.metadata.get('algorithm')}"
+
+        )
+
+        logger.info(
+
+            f"Expected Features    : {len(self.feature_columns)}"
+
+        )
+
+        logger.info(
+
+            f"Scaling Features     : {len(self.scaling_columns)}"
+
+        )
+
+        logger.info(
+
+            f"R2 Score             : {metrics.get('R2')}"
+
+        )
+
+        logger.info(
+
+            f"MAE                  : {metrics.get('MAE')}"
+
+        )
+
+        logger.info(
+
+            f"RMSE                 : {metrics.get('RMSE')}"
+
+        )
+
+        logger.info(
+
+            f"Artifacts            : {ARTIFACT_DIR}"
+
+        )
+
+        logger.info("=" * 70)
+
+        logger.info("Prediction Service Ready")
+
+        logger.info("=" * 70)
+
 
     # ========================================================
     # Feature Preparation
@@ -612,27 +673,12 @@ class PredictionService:
         input_data,
     ):
 
-        # ----------------------------------------------------
-        # Make sure model is loaded
-        # ----------------------------------------------------
-
         if not self.is_loaded:
-
             raise RuntimeError(
-                "Model is not loaded. "
-                "Call predictor.load_model() "
-                "before making predictions."
+                "Model is not loaded. Call predictor.load_model() before making predictions."
             )
 
-        # ----------------------------------------------------
-        # Convert input to DataFrame
-        # ----------------------------------------------------
-
         df = pd.DataFrame([input_data])
-
-        # ----------------------------------------------------
-        # Validate raw input fields
-        # ----------------------------------------------------
 
         required_raw_features = [
             "age",
@@ -651,17 +697,16 @@ class PredictionService:
             "employment_status",
         ]
 
-        missing_features = [
-            feature for feature in required_raw_features if feature not in df.columns
+        missing = [
+            feature
+            for feature in required_raw_features
+            if feature not in df.columns
         ]
 
-        if missing_features:
-
-            raise ValueError("Missing required input fields: " f"{missing_features}")
-
-        # ====================================================
-        # Feature Engineering
-        # ====================================================
+        if missing:
+            raise ValueError(
+                f"Missing required input fields: {missing}"
+            )
 
         # ----------------------------------------------------
         # Medical history
@@ -680,46 +725,35 @@ class PredictionService:
             df["medical_history"]
             .fillna("none")
             .astype(str)
-            .str.split(
-                " & ",
-                expand=True,
-            )
+            .str.split(" & ", expand=True)
         )
 
         df["disease1"] = split_history[0].fillna("none").str.lower()
 
         if 1 in split_history.columns:
-
-            df["disease2"] = split_history[1].fillna("none").str.lower()
-
+            df["disease2"] = (
+                split_history[1]
+                .fillna("none")
+                .str.lower()
+            )
         else:
-
             df["disease2"] = "none"
 
-        df["total_risk_score"] = df["disease1"].map(risk_scores).fillna(0) + df[
-            "disease2"
-        ].map(risk_scores).fillna(0)
+        df["total_risk_score"] = (
+            df["disease1"].map(risk_scores).fillna(0)
+            + df["disease2"].map(risk_scores).fillna(0)
+        )
 
         # ----------------------------------------------------
         # Normalized risk score
         # ----------------------------------------------------
 
-        risk_min = 0
-
-        risk_max = 16
-
-        if risk_max == risk_min:
-
-            df["normalized_risk_score"] = 0.0
-
-        else:
-
-            df["normalized_risk_score"] = (df["total_risk_score"] - risk_min) / (
-                risk_max - risk_min
-            )
+        df["normalized_risk_score"] = (
+            df["total_risk_score"] / 16
+        )
 
         # ----------------------------------------------------
-        # Lifestyle risk score
+        # Lifestyle score
         # ----------------------------------------------------
 
         physical = {
@@ -734,12 +768,18 @@ class PredictionService:
             "Low": 0,
         }
 
-        df["lifestyle_risk_score"] = df["physical_activity"].map(physical).fillna(
-            0
-        ) + df["stress_level"].map(stress).fillna(0)
+        df["lifestyle_risk_score"] = (
+            df["physical_activity"]
+            .map(physical)
+            .fillna(0)
+            +
+            df["stress_level"]
+            .map(stress)
+            .fillna(0)
+        )
 
         # ----------------------------------------------------
-        # Label encoding
+        # Label Encoding
         # ----------------------------------------------------
 
         df["insurance_plan"] = df["insurance_plan"].map(
@@ -760,120 +800,76 @@ class PredictionService:
         )
 
         # ----------------------------------------------------
-        # One-hot encoding
+        # One Hot Encoding
         # ----------------------------------------------------
-
-        categorical_columns = [
-            "gender",
-            "region",
-            "marital_status",
-            "bmi_category",
-            "smoking_status",
-            "employment_status",
-        ]
 
         df = pd.get_dummies(
             df,
-            columns=categorical_columns,
+            columns=[
+                "gender",
+                "region",
+                "marital_status",
+                "bmi_category",
+                "smoking_status",
+                "employment_status",
+            ],
             drop_first=True,
             dtype=int,
         )
 
         # ----------------------------------------------------
-        # Drop raw columns
+        # Remove training helper columns
         # ----------------------------------------------------
-
-        columns_to_drop = [
-            "medical_history",
-            "disease1",
-            "disease2",
-            "total_risk_score",
-            "physical_activity",
-            "stress_level",
-        ]
 
         df.drop(
-            columns=columns_to_drop,
-            axis=1,
-            inplace=True,
+            columns=[
+                "medical_history",
+                "physical_activity",
+                "stress_level",
+                "disease1",
+                "disease2",
+                "total_risk_score",
+            ],
             errors="ignore",
+            inplace=True,
         )
 
-        # ====================================================
-        # Ensure expected feature columns
-        # ====================================================
-
-        for feature in self.feature_columns:
-
-            if feature not in df.columns:
-
-                df[feature] = 0
-
         # ----------------------------------------------------
-        # Remove unexpected columns
+        # Missing Columns
         # ----------------------------------------------------
+
+        for column in self.feature_columns:
+
+            if column not in df.columns:
+                df[column] = 0
 
         df = df[self.feature_columns]
-
-        # ----------------------------------------------------
-        # Convert to numeric
-        # ----------------------------------------------------
 
         df = df.apply(
             pd.to_numeric,
             errors="coerce",
         )
 
-        # ----------------------------------------------------
-        # Validate missing values
-        # ----------------------------------------------------
-
         if df.isnull().any().any():
 
-            invalid_columns = df.columns[df.isnull().any()].tolist()
-
-            raise ValueError(
-                "Invalid or missing values " "found in features: " f"{invalid_columns}"
+            invalid_columns = (
+                df.columns[df.isnull().any()]
+                .tolist()
             )
 
-        # ====================================================
-        # Apply trained scaler
-        # ====================================================
-
-        scaling_columns_available = [
-            column for column in self.scaling_columns if column in df.columns
-        ]
-
-        # ----------------------------------------------------
-        # Ensure all scaling columns exist
-        # ----------------------------------------------------
-
-        if len(scaling_columns_available) != len(self.scaling_columns):
-
             raise ValueError(
-                "Not all scaling columns "
-                "are available. "
-                f"Expected: "
-                f"{self.scaling_columns}, "
-                f"Available: "
-                f"{scaling_columns_available}"
+                f"Invalid values found in {invalid_columns}"
             )
 
         # ----------------------------------------------------
-        # Transform exactly the columns used during training
+        # Scaling
         # ----------------------------------------------------
 
-        df[self.scaling_columns] = self.scaler.transform(df[self.scaling_columns])
-
-        # ----------------------------------------------------
-        # Final feature validation
-        # ----------------------------------------------------
-
-        if list(df.columns) != self.feature_columns:
-
-            raise ValueError(
-                "Final feature order does not " "match training feature order"
+        df[self.scaling_columns] = (
+            self.scaler.transform(
+                df[self.scaling_columns]
             )
+        )
 
         return df
 
@@ -886,87 +882,51 @@ class PredictionService:
         input_data,
     ):
 
+        if not self.is_loaded:
+            raise RuntimeError(
+                "Model is not loaded. Call predictor.load_model() before making predictions."
+            )
+
         try:
-
-            # ------------------------------------------------
-            # Ensure model is loaded
-            # ------------------------------------------------
-
-            if not self.is_loaded:
-
-                raise RuntimeError(
-                    "Model is not loaded. "
-                    "Call predictor.load_model() "
-                    "before making predictions."
-                )
-
-            # ------------------------------------------------
-            # Prepare features
-            # ------------------------------------------------
 
             X = self.prepare_features(input_data)
 
-            # ------------------------------------------------
-            # Generate prediction
-            # ------------------------------------------------
-
             prediction = self.model.predict(X)
 
-            prediction_value = float(prediction[0])
+            prediction = float(prediction[0])
 
-            # ------------------------------------------------
-            # Validate prediction
-            # ------------------------------------------------
+            if not np.isfinite(prediction):
+                raise ValueError(
+                    "Invalid prediction generated."
+                )
 
-            if not np.isfinite(prediction_value):
-
-                raise ValueError("Model returned an invalid " "prediction")
-
-            if prediction_value < 0:
-
-                raise ValueError("Model returned a negative " "premium")
-
-            # ------------------------------------------------
-            # Return response
-            # ------------------------------------------------
+            if prediction < 0:
+                raise ValueError(
+                    "Negative premium generated."
+                )
 
             return {
-                "prediction": round(
-                    prediction_value,
-                    2,
+                "prediction": round(prediction, 2),
+                "model_version": self.metadata.get(
+                    "model_version"
                 ),
-                "model_version": (self.metadata.get("model_version")),
-                "algorithm": (self.metadata.get("algorithm")),
-                "model_metrics": (
-                    self.metadata.get(
-                        "metrics",
-                        {},
-                    )
+                "algorithm": self.metadata.get(
+                    "algorithm"
+                ),
+                "metrics": self.metadata.get(
+                    "metrics",
+                    {},
                 ),
             }
 
         except Exception as e:
-
-            raise RuntimeError(f"Prediction failed: {str(e)}") from e
+            raise RuntimeError(
+                f"Prediction failed: {e}"
+            ) from e
 
 
 # ============================================================
 # Global Predictor
-#
-# IMPORTANT:
-#
-# Do NOT load S3 here.
-#
-# This object can safely be imported by pytest:
-#
-#     from src.prediction import predictor
-#
-# No AWS credentials are required during import.
-#
-# Production startup should explicitly call:
-#
-#     predictor.load_model()
-#
 # ============================================================
 
 predictor = PredictionService()
