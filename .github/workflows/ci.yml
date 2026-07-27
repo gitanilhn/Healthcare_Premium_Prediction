@@ -30,6 +30,14 @@ jobs:
       - name: Install Dependencies
         run: uv sync --frozen
 
+      - name: Verify Python environment
+        run: |
+        uv run python --version
+        uv run python -c "import boto3; print('✓ boto3 imported successfully')"
+        uv run python -c "import sklearn; print('✓ scikit-learn imported successfully')"
+        uv run python -c "import xgboost; print('✓ xgboost imported successfully')"
+        uv run python -c "import fastapi; print('✓ fastapi imported successfully')"
+
       - name: Run Unit Tests
         env:
           MODEL_LOAD_MODE: local
