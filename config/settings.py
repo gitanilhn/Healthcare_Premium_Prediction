@@ -1,8 +1,13 @@
 from pathlib import Path
-from dotenv import load_dotenv
 import os
 
+from dotenv import load_dotenv
+
 load_dotenv()
+
+# -------------------------------------------------------
+# Project
+# -------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -10,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Environment
 # -------------------------------------------------------
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+APP_ENV = os.getenv("APP_ENV", "development")
 
 # local | s3
 MODEL_SOURCE = os.getenv("MODEL_SOURCE", "local").lower()
