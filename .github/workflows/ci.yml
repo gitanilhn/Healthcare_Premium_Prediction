@@ -30,7 +30,7 @@ jobs:
       - name: Install Dependencies
         run: uv sync --locked
 
-      - name: Verify Python environment
+      - name: Verify Python Environment
         run: |
           uv run python --version
           uv run python -c "import boto3; print('✓ boto3 imported successfully')"
