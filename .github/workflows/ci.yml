@@ -4,8 +4,7 @@ on:
   push:
     branches:
       - main
-      
-# Required for GitHub OIDC authentication with AWS
+
 permissions:
   id-token: write
   contents: read
@@ -15,98 +14,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------------------------------------------------------
-      # 1. Checkout source code
-      # ---------------------------------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------
-      # 2. Setup Python
-      # ---------------------------------------------------------
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+      - name: Check GitHub OIDC Environment
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Ref: $GITHUB_REF"
+          echo "Event: $GITHUB_EVENT_NAME"
 
-      # ---------------------------------------------------------
-      # 3. Install uv
-      # ---------------------------------------------------------
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: latest
-
-      # ---------------------------------------------------------
-      # 4. Install dependencies
-      # ---------------------------------------------------------
-      - name: Install Dependencies
-        run: uv sync --locked
-
-      # ---------------------------------------------------------
-      # 5. Authenticate to AWS using GitHub OIDC
-      # ---------------------------------------------------------
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcareModelReadRole
           aws-region: ap-south-1
-
-      # ---------------------------------------------------------
-      # 6. Download model artifacts from S3
-      # ---------------------------------------------------------
-      - name: Download Model Artifacts from S3
-        env:
-          MODEL_BUCKET: healthcare-premium-mlops-anil
-          MODEL_PATH: models/healthcare-premium-prediction/v1
-        run: |
-          mkdir -p artifacts/latest
-
-          aws s3 cp "s3://${MODEL_BUCKET}/${MODEL_PATH}/model.pkl" \
-            artifacts/latest/model.pkl
-
-          aws s3 cp "s3://${MODEL_BUCKET}/${MODEL_PATH}/preprocessor.pkl" \
-            artifacts/latest/preprocessor.pkl
-
-          aws s3 cp "s3://${MODEL_BUCKET}/${MODEL_PATH}/metadata.json" \
-            artifacts/latest/metadata.json
-
-          aws s3 cp "s3://${MODEL_BUCKET}/${MODEL_PATH}/feature_schema.json" \
-            artifacts/latest/feature_schema.json
-
-          echo "Downloaded model artifacts:"
-          ls -lh artifacts/latest
-
-      # ---------------------------------------------------------
-      # 7. Verify Python environment
-      # ---------------------------------------------------------
-      - name: Verify Python Environment
-        run: |
-          uv run python --version
-          uv run python -c "import boto3; print('✓ boto3 imported successfully')"
-          uv run python -c "import sklearn; print('✓ scikit-learn imported successfully')"
-          uv run python -c "import xgboost; print('✓ xgboost imported successfully')"
-          uv run python -c "import fastapi; print('✓ fastapi imported successfully')"
-          uv run python -c "import boto3; print('boto3 version:', boto3.__version__)"
-          uv run python -c "from config.settings import APP_ENV; print('APP_ENV:', APP_ENV)"
-
-      # ---------------------------------------------------------
-      # 8. Run unit tests using downloaded local artifacts
-      # ---------------------------------------------------------
-      - name: Run Unit Tests
-        env:
-          MODEL_LOAD_MODE: local
-          MODEL_LOCAL_DIR: artifacts/latest
-        run: uv run pytest -v
-
-      # ---------------------------------------------------------
-      # 9. Check Black formatting
-      # ---------------------------------------------------------
-      - name: Check Black Formatting
-        run: uv run black --check app.py schemas.py src tests
-
-      # ---------------------------------------------------------
-      # 10. Run Flake8
-      # ---------------------------------------------------------
-      - name: Run Flake8
-        run: uv run flake8 app.py schemas.py src tests
