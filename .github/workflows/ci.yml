@@ -1,103 +1,227 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
+push:
+branches:
+- main
 
-  pull_request:
-    branches:
-      - main
+pull_request:
+branches:
+- main
+
+# Required for GitHub OIDC authentication with AWS
 
 permissions:
-  contents: read
+id-token: write
+contents: read
 
 jobs:
 
-  test:
+test:
 
-    name: Test and Build
+```
+name: Test and Build
 
-    runs-on: ubuntu-latest
+runs-on: ubuntu-latest
 
-    steps:
+steps:
 
-      # ============================================================
-      # 1. CHECKOUT
-      # ============================================================
+  # ============================================================
+  # 1. CHECKOUT
+  # ============================================================
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-
-      # ============================================================
-      # 2. SETUP PYTHON
-      # ============================================================
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
 
-      # ============================================================
-      # 3. INSTALL UV
-      # ============================================================
+  # ============================================================
+  # 2. SETUP PYTHON
+  # ============================================================
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-
-
-      # ============================================================
-      # 4. INSTALL EXACT LOCKED DEPENDENCIES
-      # ============================================================
-
-      - name: Install dependencies
-        run: |
-          uv sync --locked
+  - name: Setup Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.10"
 
 
-      # ============================================================
-      # 5. VERIFY PYTHON ENVIRONMENT
-      # ============================================================
+  # ============================================================
+  # 3. INSTALL UV
+  # ============================================================
 
-      - name: Verify Python environment
-        run: |
-          uv run python --version
-
-          uv run python -c "import boto3"
-          uv run python -c "import sklearn"
-          uv run python -c "import xgboost"
-          uv run python -c "import fastapi"
-
-          echo "All required packages imported successfully."
+  - name: Install uv
+    uses: astral-sh/setup-uv@v6
 
 
-      # ============================================================
-      # 6. RUN UNIT TESTS
-      # ============================================================
+  # ============================================================
+  # 4. INSTALL EXACT LOCKED DEPENDENCIES
+  # ============================================================
 
-      - name: Run tests
-        run: |
-          uv run pytest -v
-
-
-      # ============================================================
-      # 7. BUILD DOCKER IMAGE
-      # ============================================================
-
-      - name: Build Docker image
-        run: |
-          docker build \
-            --no-cache \
-            -t healthcare-premium-api:${{ github.sha }} \
-            .
+  - name: Install dependencies
+    run: |
+      uv sync --locked
 
 
-      # ============================================================
-      # 8. VERIFY DOCKER IMAGE
-      # ============================================================
+  # ============================================================
+  # 5. VERIFY PYTHON ENVIRONMENT
+  # ============================================================
 
-      - name: Verify Docker image
-        run: |
-          docker images
+  - name: Verify Python environment
+    run: |
+      uv run python --version
+
+      uv run python -c "import boto3"
+      uv run python -c "import sklearn"
+      uv run python -c "import xgboost"
+      uv run python -c "import fastapi"
+
+      echo "All required packages imported successfully."
+
+
+  # ============================================================
+  # 6. CONFIGURE AWS CREDENTIALS USING GITHUB OIDC
+  # ============================================================
+
+  - name: Configure AWS credentials
+    uses: aws-actions/configure-aws-credentials@v4
+    with:
+      role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+      aws-region: ap-south-1
+
+
+  # ============================================================
+  # 7. VERIFY AWS IDENTITY
+  # ============================================================
+
+  - name: Verify AWS connection
+    run: |
+      aws sts get-caller-identity
+
+
+  # ============================================================
+  # 8. DOWNLOAD MODEL ARTIFACTS FROM S3
+  # ============================================================
+
+  - name: Download model artifacts from S3
+    run: |
+
+      echo "Downloading model artifacts from S3..."
+
+      mkdir -p artifacts/latest
+
+      aws s3 cp \
+        s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/ \
+        artifacts/latest/ \
+        --recursive
+
+      echo "S3 model artifacts downloaded successfully."
+
+
+  # ============================================================
+  # 9. VERIFY MODEL ARTIFACTS
+  # ============================================================
+
+  - name: Verify model artifacts
+    run: |
+
+      echo "Checking downloaded model artifacts..."
+
+      ls -lh artifacts/latest
+
+      test -f artifacts/latest/model.pkl
+      test -f artifacts/latest/preprocessor.pkl
+      test -f artifacts/latest/metadata.json
+      test -f artifacts/latest/feature_schema.json
+
+      echo "All required model artifacts are present."
+
+
+  # ============================================================
+  # 10. RUN UNIT TESTS
+  # ============================================================
+
+  - name: Run tests
+    env:
+      MODEL_SOURCE: local
+      MODEL_VERSION: v2
+    run: |
+      uv run pytest -v
+
+
+  # ============================================================
+  # 11. BUILD DOCKER IMAGE
+  # ============================================================
+
+  - name: Build Docker image
+    run: |
+      docker build \
+        --no-cache \
+        -t healthcare-premium-api:${{ github.sha }} \
+        .
+
+
+  # ============================================================
+  # 12. VERIFY DOCKER IMAGE
+  # ============================================================
+
+  - name: Verify Docker image
+    run: |
+      docker images
+
+      docker image inspect \
+        healthcare-premium-api:${{ github.sha }}
+
+
+  # ============================================================
+  # 13. START DOCKER CONTAINER
+  # ============================================================
+
+  - name: Start Docker container
+    run: |
+
+      docker run \
+        -d \
+        --name healthcare-premium-api \
+        -p 8000:8000 \
+        -e MODEL_SOURCE=local \
+        -e MODEL_VERSION=v2 \
+        healthcare-premium-api:${{ github.sha }}
+
+
+  # ============================================================
+  # 14. WAIT FOR APPLICATION STARTUP
+  # ============================================================
+
+  - name: Wait for application startup
+    run: |
+
+      echo "Waiting for FastAPI application..."
+
+      sleep 10
+
+      docker logs healthcare-premium-api
+
+
+  # ============================================================
+  # 15. TEST DOCKER HEALTH ENDPOINT
+  # ============================================================
+
+  - name: Test Docker health endpoint
+    run: |
+
+      curl --fail \
+        http://localhost:8000/health
+
+      echo "Docker health endpoint passed."
+
+
+  # ============================================================
+  # 16. STOP DOCKER CONTAINER
+  # ============================================================
+
+  - name: Stop Docker container
+    if: always()
+    run: |
+
+      docker stop healthcare-premium-api || true
+
+      docker rm healthcare-premium-api || true
