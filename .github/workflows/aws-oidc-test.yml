@@ -1,0 +1,100 @@
+name: AWS OIDC Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  aws-oidc-test:
+
+    name: Test AWS OIDC and S3 Access
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ============================================================
+      # 2. CONFIGURE AWS CREDENTIALS USING OIDC
+      # ============================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcarePremiumRole
+          aws-region: ap-south-1
+
+
+      # ============================================================
+      # 3. VERIFY AWS IDENTITY
+      # ============================================================
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # ============================================================
+      # 4. VERIFY S3 ACCESS
+      # ============================================================
+
+      - name: Verify S3 model artifact access
+        run: |
+          aws s3 ls \
+            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/
+
+
+      # ============================================================
+      # 5. DOWNLOAD MODEL ARTIFACTS
+      # ============================================================
+
+      - name: Download model artifacts
+        run: |
+
+          mkdir -p artifacts/latest
+
+          aws s3 cp \
+            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/model.pkl \
+            artifacts/latest/model.pkl
+
+          aws s3 cp \
+            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/preprocessor.pkl \
+            artifacts/latest/preprocessor.pkl
+
+          aws s3 cp \
+            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/metadata.json \
+            artifacts/latest/metadata.json
+
+          aws s3 cp \
+            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/feature_schema.json \
+            artifacts/latest/feature_schema.json
+
+
+      # ============================================================
+      # 6. VERIFY ARTIFACTS
+      # ============================================================
+
+      - name: Verify downloaded artifacts
+        run: |
+
+          echo "Downloaded artifacts:"
+
+          ls -lh artifacts/latest
+
+          test -f artifacts/latest/model.pkl
+          test -f artifacts/latest/preprocessor.pkl
+          test -f artifacts/latest/metadata.json
+          test -f artifacts/latest/feature_schema.json
+
+          echo "All model artifacts downloaded successfully."
