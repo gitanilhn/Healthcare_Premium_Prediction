@@ -1,33 +1,103 @@
-name: Healthcare Premium CI
+name: CI
 
 on:
   push:
     branches:
       - main
 
+  pull_request:
+    branches:
+      - main
+
 permissions:
-  id-token: write
   contents: read
 
 jobs:
+
   test:
+
+    name: Test and Build
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check GitHub OIDC Environment
-        run: |
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Ref: $GITHUB_REF"
-          echo "Event: $GITHUB_EVENT_NAME"
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      # ============================================================
+      # 2. SETUP PYTHON
+      # ============================================================
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcareModelReadRole
-          aws-region: ap-south-1
+          python-version: "3.10"
 
-      - name: Test AWS Connection
-        run: aws sts get-caller-identity
+
+      # ============================================================
+      # 3. INSTALL UV
+      # ============================================================
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+
+      # ============================================================
+      # 4. INSTALL EXACT LOCKED DEPENDENCIES
+      # ============================================================
+
+      - name: Install dependencies
+        run: |
+          uv sync --locked
+
+
+      # ============================================================
+      # 5. VERIFY PYTHON ENVIRONMENT
+      # ============================================================
+
+      - name: Verify Python environment
+        run: |
+          uv run python --version
+
+          uv run python -c "import boto3"
+          uv run python -c "import sklearn"
+          uv run python -c "import xgboost"
+          uv run python -c "import fastapi"
+
+          echo "All required packages imported successfully."
+
+
+      # ============================================================
+      # 6. RUN UNIT TESTS
+      # ============================================================
+
+      - name: Run tests
+        run: |
+          uv run pytest -v
+
+
+      # ============================================================
+      # 7. BUILD DOCKER IMAGE
+      # ============================================================
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --no-cache \
+            -t healthcare-premium-api:${{ github.sha }} \
+            .
+
+
+      # ============================================================
+      # 8. VERIFY DOCKER IMAGE
+      # ============================================================
+
+      - name: Verify Docker image
+        run: |
+          docker images

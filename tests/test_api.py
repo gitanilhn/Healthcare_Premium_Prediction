@@ -44,10 +44,10 @@ def test_prediction_response_contains_data():
 
     data = response.json()
 
-    assert "prediction" in data
-    assert "model_version" in data
-    assert "algorithm" in data
-    assert "model_metrics" in data
+    assert "predicted_premium" in data
+    assert isinstance(data["predicted_premium"], (int, float))
+    assert data["predicted_premium"] > 0
 
-    assert isinstance(data["prediction"], (int, float))
-    assert data["prediction"] > 0
+    assert "model_version" in data
+    assert isinstance(data["model_version"], str)
+    assert len(data["model_version"]) > 0
