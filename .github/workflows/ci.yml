@@ -28,3 +28,6 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcareModelReadRole
           aws-region: ap-south-1
+
+      - name: Test AWS Connection
+        run: aws sts get-caller-identity

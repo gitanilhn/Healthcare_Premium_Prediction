@@ -1,43 +1,52 @@
 from pathlib import Path
 import os
 
-from dotenv import load_dotenv
+# ============================================================
+# Project Paths
+# ============================================================
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# -------------------------------------------------------
-# Project
-# -------------------------------------------------------
+ARTIFACT_ROOT = PROJECT_ROOT / "artifacts"
+LATEST_ARTIFACT_DIR = ARTIFACT_ROOT / "latest"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-# -------------------------------------------------------
-# Environment
-# -------------------------------------------------------
-
-APP_ENV = os.getenv("APP_ENV", "development")
-
-# local | s3
-MODEL_SOURCE = os.getenv("MODEL_SOURCE", "local").lower()
-
-AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
-
-MODEL_BUCKET = os.getenv("MODEL_BUCKET", "")
-
-MODEL_VERSION = os.getenv("MODEL_VERSION", "latest")
-
-MLFLOW_TRACKING_URI = os.getenv(
-    "MLFLOW_TRACKING_URI",
-    "http://127.0.0.1:5000",
+LATEST_ARTIFACT_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
 )
 
-# -------------------------------------------------------
-# Local Artifacts
-# -------------------------------------------------------
+# ============================================================
+# Model Configuration
+# ============================================================
 
-ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
+MODEL_SOURCE = os.getenv(
+    "MODEL_SOURCE",
+    "local",          # change to "s3" in production
+).lower()
 
-LATEST_ARTIFACT_DIR = ARTIFACTS_DIR / "latest"
+MODEL_VERSION = os.getenv(
+    "MODEL_VERSION",
+    "v2",
+)
+
+MODEL_BUCKET = os.getenv(
+    "MODEL_BUCKET",
+    "healthcare-premium-mlops-anil",
+)
+
+AWS_REGION = os.getenv(
+    "AWS_REGION",
+    "ap-south-1",
+)
+
+MODEL_PREFIX = os.getenv(
+    "MODEL_PATH",
+    "models/healthcare-premium-prediction/v1",
+)
+
+# ============================================================
+# Local Artifact Paths
+# ============================================================
 
 MODEL_FILE = LATEST_ARTIFACT_DIR / "model.pkl"
 
@@ -46,3 +55,14 @@ PREPROCESSOR_FILE = LATEST_ARTIFACT_DIR / "preprocessor.pkl"
 METADATA_FILE = LATEST_ARTIFACT_DIR / "metadata.json"
 
 FEATURE_SCHEMA_FILE = LATEST_ARTIFACT_DIR / "feature_schema.json"
+
+# ============================================================
+# Required Artifacts
+# ============================================================
+
+REQUIRED_ARTIFACTS = {
+    "model.pkl": MODEL_FILE,
+    "preprocessor.pkl": PREPROCESSOR_FILE,
+    "metadata.json": METADATA_FILE,
+    "feature_schema.json": FEATURE_SCHEMA_FILE,
+}

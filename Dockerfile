@@ -21,7 +21,8 @@ COPY app.py .
 COPY schemas.py .
 COPY src ./src
 COPY config ./config
-COPY artifacts ./artifacts
+COPY utils ./utils
+
 
 EXPOSE 8000
 

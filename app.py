@@ -1,52 +1,176 @@
 from fastapi import FastAPI, HTTPException
-
-from schemas import PredictionRequest
+from pydantic import BaseModel, Field
 
 from src.prediction import predictor
 
-from dotenv import load_dotenv
 
-load_dotenv()
+# ==========================================================
+# FastAPI Application
+# ==========================================================
 
 app = FastAPI(
     title="Healthcare Premium Prediction API",
+    description=(
+        "ML API for predicting healthcare insurance premiums."
+    ),
     version="1.0.0",
 )
 
-predictor.load_model()
+
+# ==========================================================
+# Request Schema
+# ==========================================================
+
+class PredictionRequest(BaseModel):
+
+    age: int = Field(
+        ...,
+        ge=0,
+        description="Age of the individual",
+    )
+
+    number_of_dependants: int = Field(
+        ...,
+        ge=0,
+        description="Number of dependants",
+    )
+
+    income_level: str = Field(
+        ...,
+        description="Income category",
+    )
+
+    income_lakhs: float = Field(
+        ...,
+        ge=0,
+        description="Annual income in lakhs",
+    )
+
+    insurance_plan: str
+
+    medical_history: str
+
+    physical_activity: str
+
+    stress_level: str
+
+    gender: str
+
+    region: str
+
+    marital_status: str
+
+    bmi_category: str
+
+    smoking_status: str
+
+    employment_status: str
 
 
-@app.get("/")
-def root():
+# ==========================================================
+# Response Schema
+# ==========================================================
 
-    return {
-        "message": "Healthcare Premium Prediction API",
-        "model_version": predictor.metadata["model_version"],
-        "algorithm": predictor.metadata["algorithm"],
-    }
+class PredictionResponse(BaseModel):
+
+    predicted_premium: float
+
+    model_version: str
 
 
-@app.get("/health")
-def health():
+# ==========================================================
+# Health Check
+# ==========================================================
+
+@app.get(
+    "/health",
+)
+def health_check():
 
     return {
         "status": "healthy",
-        "model_loaded": True,
-        "model_version": predictor.metadata["model_version"],
+        "service": "healthcare-premium-prediction",
     }
 
 
-@app.post("/predict")
+# ==========================================================
+# Readiness Check
+# ==========================================================
+
+@app.get(
+    "/ready",
+)
+def readiness_check():
+
+    if not predictor.is_loaded:
+
+        raise HTTPException(
+            status_code=503,
+            detail="Prediction model is not ready.",
+        )
+
+    return {
+        "status": "ready",
+        "model_loaded": True,
+        "model_version": predictor.model_version,
+    }
+
+
+# ==========================================================
+# Prediction Endpoint
+# ==========================================================
+
+@app.post(
+    "/predict",
+    response_model=PredictionResponse,
+)
 def predict(
     request: PredictionRequest,
 ):
 
     try:
 
-        result = predictor.predict(request.model_dump())
+        # Convert validated Pydantic model
+        # into dictionary
 
-        return result
+        input_data = request.model_dump()
+
+
+        # Run prediction
+
+        prediction = predictor.predict(
+            input_data
+        )
+
+
+        # Return prediction
+
+        return PredictionResponse(
+
+            predicted_premium=float(
+                prediction
+            ),
+
+            model_version=(
+                predictor.model_version
+            ),
+        )
+
+
+    except ValueError as e:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
+
 
     except Exception as e:
 
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Prediction failed: "
+                f"{str(e)}"
+            ),
+        )
