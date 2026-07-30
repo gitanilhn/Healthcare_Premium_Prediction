@@ -1,100 +1,39 @@
-name: AWS OIDC Test
+name: Upload Artifacts to S3
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  BUCKET_NAME: healthcare-premium-mlops-anil   # Change if different
+  AWS_REGION: ap-south-1
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-
-  aws-oidc-test:
-
-    name: Test AWS OIDC and S3 Access
-
+  S3PackageUpload:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
 
-      # ============================================================
-      # 1. CHECKOUT
-      # ============================================================
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-
-      # ============================================================
-      # 2. CONFIGURE AWS CREDENTIALS USING OIDC
-      # ============================================================
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcarePremiumRole
-          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE }}
+          role-session-name: github-actions
+          aws-region: ${{ env.AWS_REGION }}
 
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
 
-      # ============================================================
-      # 3. VERIFY AWS IDENTITY
-      # ============================================================
+      - name: List S3 Bucket
+        run: aws s3 ls s3://${{ env.BUCKET_NAME }}
 
-      - name: Verify AWS identity
+      - name: Upload Artifacts
         run: |
-          aws sts get-caller-identity
-
-
-      # ============================================================
-      # 4. VERIFY S3 ACCESS
-      # ============================================================
-
-      - name: Verify S3 model artifact access
-        run: |
-          aws s3 ls \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/
-
-
-      # ============================================================
-      # 5. DOWNLOAD MODEL ARTIFACTS
-      # ============================================================
-
-      - name: Download model artifacts
-        run: |
-
-          mkdir -p artifacts/latest
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/model.pkl \
-            artifacts/latest/model.pkl
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/preprocessor.pkl \
-            artifacts/latest/preprocessor.pkl
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/metadata.json \
-            artifacts/latest/metadata.json
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/feature_schema.json \
-            artifacts/latest/feature_schema.json
-
-
-      # ============================================================
-      # 6. VERIFY ARTIFACTS
-      # ============================================================
-
-      - name: Verify downloaded artifacts
-        run: |
-
-          echo "Downloaded artifacts:"
-
-          ls -lh artifacts/latest
-
-          test -f artifacts/latest/model.pkl
-          test -f artifacts/latest/preprocessor.pkl
-          test -f artifacts/latest/metadata.json
-          test -f artifacts/latest/feature_schema.json
-
-          echo "All model artifacts downloaded successfully."
+          aws s3 sync artifacts/ s3://${{ env.BUCKET_NAME }}/artifacts/
