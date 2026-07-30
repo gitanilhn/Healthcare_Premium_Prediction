@@ -14,22 +14,18 @@ permissions:
   id-token: write
 
 jobs:
-
   test:
-
     name: Test and Build
-
     runs-on: ubuntu-latest
 
     steps:
 
       # ============================================================
-      # 1. CHECKOUT
+      # 1. CHECKOUT SOURCE CODE
       # ============================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
-
 
       # ============================================================
       # 2. SETUP PYTHON
@@ -40,14 +36,12 @@ jobs:
         with:
           python-version: "3.10"
 
-
       # ============================================================
       # 3. INSTALL UV
       # ============================================================
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
-
 
       # ============================================================
       # 4. INSTALL DEPENDENCIES
@@ -57,9 +51,8 @@ jobs:
         run: |
           uv sync --locked
 
-
       # ============================================================
-      # 5. VERIFY PYTHON
+      # 5. VERIFY PYTHON ENVIRONMENT
       # ============================================================
 
       - name: Verify Python environment
@@ -70,31 +63,28 @@ jobs:
           uv run python -c "import xgboost"
           uv run python -c "import fastapi"
 
-          echo "All required packages imported successfully."
-
+          echo "Python environment verified."
 
       # ============================================================
-      # 6. CONFIGURE AWS USING GITHUB OIDC
+      # 6. CONFIGURE AWS (OIDC)
       # ============================================================
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcarePremiumRole
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ap-south-1
 
-
       # ============================================================
-      # 7. VERIFY AWS CONNECTION
+      # 7. VERIFY AWS LOGIN
       # ============================================================
 
-      - name: Verify AWS identity
+      - name: Verify AWS Identity
         run: |
           aws sts get-caller-identity
 
-
       # ============================================================
-      # 8. DOWNLOAD MODEL ARTIFACTS FROM S3
+      # 8. DOWNLOAD MODEL ARTIFACTS
       # ============================================================
 
       - name: Download model artifacts
@@ -117,9 +107,8 @@ jobs:
             s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/feature_schema.json \
             artifacts/latest/feature_schema.json
 
-
       # ============================================================
-      # 9. VERIFY MODEL ARTIFACTS
+      # 9. VERIFY ARTIFACTS
       # ============================================================
 
       - name: Verify model artifacts
@@ -131,36 +120,40 @@ jobs:
           test -f artifacts/latest/metadata.json
           test -f artifacts/latest/feature_schema.json
 
-          echo "All model artifacts are available."
-
+          echo "Model artifacts downloaded successfully."
 
       # ============================================================
-      # 10. RUN PYTEST
+      # 10. RUN UNIT TESTS
       # ============================================================
 
-      - name: Run tests
+      - name: Run Tests
         env:
           MODEL_SOURCE: local
         run: |
           uv run pytest -v
 
-
       # ============================================================
       # 11. BUILD DOCKER IMAGE
       # ============================================================
 
-      - name: Build Docker image
+      - name: Build Docker Image
         run: |
           docker build \
             --no-cache \
-            -t healthcare-premium-api:${{ github.sha }} \
-            .
-
+            -t healthcare-premium-api:${{ github.sha }} .
 
       # ============================================================
       # 12. VERIFY DOCKER IMAGE
       # ============================================================
 
-      - name: Verify Docker image
+      - name: Verify Docker Image
         run: |
           docker images healthcare-premium-api:${{ github.sha }}
+
+      # ============================================================
+      # 13. SUCCESS
+      # ============================================================
+
+      - name: Pipeline Completed
+        run: |
+          echo "CI Pipeline completed successfully."
