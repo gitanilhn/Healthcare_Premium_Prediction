@@ -1,4 +1,4 @@
-name: AWS OIDC Test
+name: Test AWS OIDC and S3
 
 on:
   workflow_dispatch:
@@ -8,93 +8,35 @@ permissions:
   contents: read
 
 jobs:
-
-  aws-oidc-test:
-
-    name: Test AWS OIDC and S3 Access
-
+  test:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ============================================================
-      # 1. CHECKOUT
-      # ============================================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      # ============================================================
-      # 2. CONFIGURE AWS CREDENTIALS USING OIDC
-      # ============================================================
-
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcarePremiumRole
-          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-
-      # ============================================================
-      # 3. VERIFY AWS IDENTITY
-      # ============================================================
-
-      - name: Verify AWS identity
+      - name: Verify AWS Identity
         run: |
           aws sts get-caller-identity
 
-
-      # ============================================================
-      # 4. VERIFY S3 ACCESS
-      # ============================================================
-
-      - name: Verify S3 model artifact access
+      - name: List S3 Bucket
         run: |
-          aws s3 ls \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/
+          aws s3 ls s3://${{ secrets.S3_BUCKET }}
 
-
-      # ============================================================
-      # 5. DOWNLOAD MODEL ARTIFACTS
-      # ============================================================
-
-      - name: Download model artifacts
+      - name: Download Model Artifacts
         run: |
-
-          mkdir -p artifacts/latest
-
+          mkdir artifacts
           aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/model.pkl \
-            artifacts/latest/model.pkl
+            s3://${{ secrets.S3_BUCKET }}/models/healthcare-premium-prediction/v1/ \
+            artifacts/ \
+            --recursive
 
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/preprocessor.pkl \
-            artifacts/latest/preprocessor.pkl
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/metadata.json \
-            artifacts/latest/metadata.json
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/feature_schema.json \
-            artifacts/latest/feature_schema.json
-
-
-      # ============================================================
-      # 6. VERIFY ARTIFACTS
-      # ============================================================
-
-      - name: Verify downloaded artifacts
+      - name: Show Downloaded Files
         run: |
-
-          echo "Downloaded artifacts:"
-
-          ls -lh artifacts/latest
-
-          test -f artifacts/latest/model.pkl
-          test -f artifacts/latest/preprocessor.pkl
-          test -f artifacts/latest/metadata.json
-          test -f artifacts/latest/feature_schema.json
-
-          echo "All model artifacts downloaded successfully."
+          ls -R artifacts

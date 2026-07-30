@@ -2,20 +2,16 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-
-  pull_request:
-    branches:
-      - main
+    branches: [aws_OIDC_test]
 
 permissions:
-  contents: read
-  id-token: write
+      id-token: write
+      contents: read
+
 
 jobs:
 
-  test:
+  oidc-test:
 
     name: Test and Build
 
@@ -27,51 +23,8 @@ jobs:
       # 1. CHECKOUT
       # ============================================================
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-
-      # ============================================================
-      # 2. SETUP PYTHON
-      # ============================================================
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-
-      # ============================================================
-      # 3. INSTALL UV
-      # ============================================================
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-
-
-      # ============================================================
-      # 4. INSTALL DEPENDENCIES
-      # ============================================================
-
-      - name: Install dependencies
-        run: |
-          uv sync --locked
-
-
-      # ============================================================
-      # 5. VERIFY PYTHON
-      # ============================================================
-
-      - name: Verify Python environment
-        run: |
-          uv run python --version
-          uv run python -c "import boto3"
-          uv run python -c "import sklearn"
-          uv run python -c "import xgboost"
-          uv run python -c "import fastapi"
-
-          echo "All required packages imported successfully."
-
+      - name: Checkout source 
+        uses: actions/checkout@v3
 
       # ============================================================
       # 6. CONFIGURE AWS USING GITHUB OIDC
@@ -80,8 +33,10 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::560205084313:role/GitHubActionsHealthcarePremiumRole
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE }}
           aws-region: ap-south-1
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
 
       # ============================================================
@@ -89,9 +44,11 @@ jobs:
       # ============================================================
 
       - name: Verify AWS identity
-        run: |
-          aws sts get-caller-identity
+        run: aws sts get-caller-identity
 
+
+      - name: Upload Artifacts
+        run: aws s3 sync artifacts/ s3://healthcare-premium-artifacts-anil/artifacts/
 
       # ============================================================
       # 8. DOWNLOAD MODEL ARTIFACTS FROM S3
