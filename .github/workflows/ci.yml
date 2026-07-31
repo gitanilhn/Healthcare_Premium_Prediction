@@ -1,123 +1,61 @@
-name: CI
+name: AWS S3 Connection Test
 
 on:
   push:
-    branches: [aws_OIDC_test]
-
-permissions:
-      id-token: write
-      contents: read
-
+    branches:
+      - main
 
 jobs:
-
-  oidc-test:
-
-    name: Test and Build
-
+  s3-test:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      # ============================================================
-      # 1. CHECKOUT
-      # ============================================================
-
-      - name: Checkout source 
-        uses: actions/checkout@v3
-
-      # ============================================================
-      # 6. CONFIGURE AWS USING GITHUB OIDC
-      # ============================================================
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          role-to-assume: ${{ secrets.AWS_IAM_ROLE }}
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: latest
+
+      - name: Install Dependencies
+        run: uv sync --locked
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-south-1
-      - name: Verify AWS identity
+
+      - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
-
-      # ============================================================
-      # 7. VERIFY AWS CONNECTION
-      # ============================================================
-
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
-
-      - name: Upload Artifacts
-        run: aws s3 sync artifacts/ s3://healthcare-premium-artifacts-anil/artifacts/
-
-      # ============================================================
-      # 8. DOWNLOAD MODEL ARTIFACTS FROM S3
-      # ============================================================
-
-      - name: Download model artifacts
+      - name: Download Model Artifacts
         run: |
           mkdir -p artifacts/latest
 
           aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/model.pkl \
-            artifacts/latest/model.pkl
+            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/ \
+            artifacts/latest/ \
+            --recursive
 
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/preprocessor.pkl \
-            artifacts/latest/preprocessor.pkl
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/metadata.json \
-            artifacts/latest/metadata.json
-
-          aws s3 cp \
-            s3://healthcare-premium-mlops-anil/models/healthcare-premium-prediction/v1/feature_schema.json \
-            artifacts/latest/feature_schema.json
-
-
-      # ============================================================
-      # 9. VERIFY MODEL ARTIFACTS
-      # ============================================================
-
-      - name: Verify model artifacts
+      - name: Verify Downloaded Artifacts
         run: |
-          ls -lh artifacts/latest
+          ls -R artifacts
 
           test -f artifacts/latest/model.pkl
           test -f artifacts/latest/preprocessor.pkl
           test -f artifacts/latest/metadata.json
           test -f artifacts/latest/feature_schema.json
 
-          echo "All model artifacts are available."
-
-
-      # ============================================================
-      # 10. RUN PYTEST
-      # ============================================================
-
-      - name: Run tests
+      - name: Run Unit Tests
         env:
+          APP_ENV: ci
           MODEL_SOURCE: local
-        run: |
-          uv run pytest -v
-
-
-      # ============================================================
-      # 11. BUILD DOCKER IMAGE
-      # ============================================================
-
-      - name: Build Docker image
-        run: |
-          docker build \
-            --no-cache \
-            -t healthcare-premium-api:${{ github.sha }} \
-            .
-
-
-      # ============================================================
-      # 12. VERIFY DOCKER IMAGE
-      # ============================================================
-
-      - name: Verify Docker image
-        run: |
-          docker images healthcare-premium-api:${{ github.sha }}
+        run: uv run pytest -v
